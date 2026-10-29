@@ -34,13 +34,13 @@
    - Edge: `edge://extensions/`
 2. 开启右上角的 **“开发者模式” (Developer Mode)**。
 3. 点击 **“加载已解压的扩展程序” (Load unpacked)**。
-4. 选择目录：`c:\Users\lin\Desktop\c#\BiliDanmakuTTS-Extension`。
-5. 打开任意 B 站视频（如热门鬼畜、科技评测、番剧），页面右下角即可看到 `🎙️ 听弹幕` 悬浮组件！
+4. 选择当前项目根目录。
+5. 打开任意 B 站视频，页面右下角即可看到极简悬浮组件！
 
 ### 方式 B：油猴脚本单文件安装 (Tampermonkey / 手机 Safari / Stay)
-* 如果你安装了 **Tampermonkey** 或 iOS Safari 上的 **Stay / Userscripts**，直接打开或新建脚本并粘贴：
-  `c:\Users\lin\Desktop\c#\BiliDanmakuTTS-Extension\bilibili-danmaku-tts.user.js`
-* 免解压、全平台即装即用！
+* 如果你安装了 **Tampermonkey** 或移动端 Safari 上的 **Stay / Userscripts**，直接新建脚本并导入：
+  `bilibili-danmaku-tts.user.js`
+* 全平台即装即用，无需编译打包。
 
 ---
 

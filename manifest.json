@@ -1,24 +1,34 @@
 {
   "manifest_version": 3,
   "name": "BiliDanmakuTTS - 息屏听弹幕助手",
-  "version": "1.0.0",
+  "version": "1.0.3",
   "description": "专为闭眼听视频、通勤听弹幕打造！智能过滤水弹幕、高频梗折叠、自动音频压限（Ducking）与真人级语音播报。",
-  "permissions": [
-    "storage"
-  ],
+  "permissions": [],
   "host_permissions": [
-    "https://*.bilibili.com/*"
+    "*://*.bilibili.com/*"
   ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "BiliDanmakuTTS 控制面板"
+    "default_title": "BiliDanmakuTTS - 息屏听弹幕助手",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
   },
   "content_scripts": [
     {
       "matches": [
-        "https://www.bilibili.com/video/*",
-        "https://www.bilibili.com/list/*",
-        "https://www.bilibili.com/bangumi/play/*"
+        "*://www.bilibili.com/video/*",
+        "*://www.bilibili.com/list/*",
+        "*://www.bilibili.com/bangumi/play/*"
       ],
       "js": [
         "core/slang-dict.js",

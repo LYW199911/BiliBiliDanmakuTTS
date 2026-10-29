@@ -2,35 +2,76 @@
 
 #bili-tts-container {
   position: fixed;
-  bottom: 85px;
-  right: 25px;
   z-index: 9999999;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   user-select: none;
   font-size: 13px;
   color: #18191c;
+  touch-action: none;
+}
+
+#bili-tts-container.snapping {
+  transition: left 0.28s cubic-bezier(0.16, 1, 0.3, 1),
+              right 0.28s cubic-bezier(0.16, 1, 0.3, 1),
+              top 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+#bili-tts-container.dragging .bili-tts-pill {
+  cursor: grabbing !important;
+  transform: scale(1.05);
+  box-shadow: 0 16px 36px rgba(251, 114, 153, 0.38);
 }
 
 /* 最小化胶囊状态 */
 .bili-tts-pill {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 14px;
-  background: rgba(255, 255, 255, 0.92);
+  gap: 6px;
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.94);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border: 1px solid rgba(251, 114, 153, 0.35);
   border-radius: 30px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12), 0 2px 6px rgba(251, 114, 153, 0.15);
-  cursor: pointer;
-  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  cursor: grab;
+  white-space: nowrap;
+  transition: opacity 0.35s ease, transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.25s ease;
+}
+
+/* 拖拽把手图标 */
+.bili-tts-pill-drag-handle {
+  font-size: 10px;
+  color: #C0C4CC;
+  letter-spacing: -1px;
+  margin-right: -2px;
+  cursor: grab;
 }
 
 .bili-tts-pill:hover {
   transform: translateY(-2px);
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.18), 0 4px 10px rgba(251, 114, 153, 0.25);
   border-color: #FB7299;
+}
+
+/* 闲置半收起状态：靠边微缩半透明，不挡选集与页面内容 */
+.bili-tts-pill.idle {
+  opacity: 0.52;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+#bili-tts-container[data-dock="right"] .bili-tts-pill.idle {
+  transform: translateX(18px);
+}
+
+#bili-tts-container[data-dock="left"] .bili-tts-pill.idle {
+  transform: translateX(-18px);
+}
+
+.bili-tts-pill:hover,
+#bili-tts-container:hover .bili-tts-pill {
+  opacity: 1 !important;
+  transform: translateX(0) translateY(-2px) !important;
 }
 
 .bili-tts-pill.active {
@@ -88,22 +129,54 @@
 /* 展开的控制面板 */
 .bili-tts-card {
   position: absolute;
-  bottom: 50px;
-  right: 0;
-  width: 320px;
-  background: rgba(255, 255, 255, 0.96);
+  width: 324px;
+  max-height: calc(100vh - 80px);
+  background: rgba(255, 255, 255, 0.97);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(227, 229, 231, 0.8);
+  border: 1px solid rgba(227, 229, 231, 0.85);
   border-radius: 16px;
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.16);
-  padding: 16px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.18);
+  padding: 14px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  transform-origin: bottom right;
+  gap: 10px;
   transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
   box-sizing: border-box;
+  z-index: 10;
+}
+
+/* 垂直方向定位：默认向上展开，顶部附近向下展开 */
+#bili-tts-container[data-v-align="up"] .bili-tts-card,
+#bili-tts-container:not([data-v-align]) .bili-tts-card {
+  bottom: 52px;
+  top: auto;
+}
+
+#bili-tts-container[data-v-align="down"] .bili-tts-card {
+  top: 52px;
+  bottom: auto;
+}
+
+/* 水平方向定位：靠右吸附时向左弹出，靠左吸附时向右弹出 */
+#bili-tts-container[data-dock="right"] .bili-tts-card {
+  right: 0;
+  left: auto;
+  transform-origin: bottom right;
+}
+
+#bili-tts-container[data-dock="right"][data-v-align="down"] .bili-tts-card {
+  transform-origin: top right;
+}
+
+#bili-tts-container[data-dock="left"] .bili-tts-card {
+  left: 0;
+  right: auto;
+  transform-origin: bottom left;
+}
+
+#bili-tts-container[data-dock="left"][data-v-align="down"] .bili-tts-card {
+  transform-origin: top left;
 }
 
 .bili-tts-card.hidden {
@@ -118,7 +191,8 @@
   align-items: center;
   justify-content: space-between;
   border-bottom: 1px solid #F1F2F3;
-  padding-bottom: 10px;
+  padding-bottom: 8px;
+  flex-shrink: 0;
 }
 
 .bili-tts-card-title {
@@ -128,6 +202,16 @@
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+.bili-tts-version-badge {
+  font-size: 10px;
+  font-weight: 600;
+  color: #FB7299;
+  background: #FFF0F5;
+  padding: 1px 6px;
+  border-radius: 10px;
+  border: 1px solid rgba(251, 114, 153, 0.35);
 }
 
 .bili-tts-close-btn {
@@ -145,6 +229,83 @@
   color: #18191C;
 }
 
+/* 二级导航标签页 */
+.bili-tts-tabs {
+  display: flex;
+  gap: 4px;
+  background: #F1F2F3;
+  padding: 3px;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.bili-tts-tab-btn {
+  flex: 1;
+  padding: 5px 0;
+  font-size: 11px;
+  font-weight: 600;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #61666D;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.bili-tts-tab-btn:hover {
+  color: #18191C;
+}
+
+.bili-tts-tab-btn.active {
+  background: #FFFFFF;
+  color: #FB7299;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+/* 内容滚动区 */
+.bili-tts-card-body {
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 2px;
+  display: flex;
+  flex-direction: column;
+}
+
+.bili-tts-card-body::-webkit-scrollbar {
+  width: 4px;
+}
+
+.bili-tts-card-body::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.12);
+  border-radius: 4px;
+}
+
+.bili-tts-card-body::-webkit-scrollbar-thumb:hover {
+  background: #FB7299;
+}
+
+.bili-tts-tab-content {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* 底部操作固定栏 */
+.bili-tts-card-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px solid #F1F2F3;
+  padding-top: 8px;
+  flex-shrink: 0;
+}
+
+.bili-tts-btn-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 /* 控制行 */
 .bili-tts-row {
   display: flex;
@@ -152,10 +313,32 @@
   justify-content: space-between;
 }
 
+.bili-tts-label-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 .bili-tts-label {
   font-size: 12px;
   font-weight: 500;
   color: #61666D;
+}
+
+.bili-tts-sub-label {
+  font-size: 10px;
+  color: #9499A0;
+  line-height: 1.2;
+}
+
+.bili-tts-pill-badge.muted {
+  background: #F1F2F3;
+  color: #9499A0;
+}
+
+.bili-tts-pill-badge.active-bg {
+  background: #ECFDF5;
+  color: #10B981;
 }
 
 /* 开关 Toggle */
@@ -279,6 +462,35 @@ input:checked + .bili-tts-slider:before {
   background: #E0567E;
 }
 
+.bili-tts-btn-pip {
+  background: #00A1D6 !important;
+}
+
+.bili-tts-btn-pip:hover {
+  background: #008CB9 !important;
+}
+
+/* 胶囊内置小窗按钮 */
+.bili-tts-pip-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 6px;
+  border-radius: 12px;
+  background: #E3F5FC;
+  color: #00A1D6;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-left: 2px;
+}
+
+.bili-tts-pip-btn:hover {
+  background: #00A1D6;
+  color: white;
+  transform: scale(1.08);
+}
+
 /* 实时朗读浮层字幕 (Live Speech Toast) */
 #bili-tts-toast {
   position: fixed;
@@ -310,4 +522,29 @@ input:checked + .bili-tts-slider:before {
 
 .bili-tts-toast-icon {
   color: #38BDF8;
+}
+
+/* 音量控制辅助提示与重置按钮 */
+.bili-tts-vol-hint {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 10px;
+  color: #9499A0;
+  margin-top: 1px;
+}
+
+.bili-tts-link-btn {
+  background: none;
+  border: none;
+  color: #00A1D6;
+  font-size: 10px;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+  transition: color 0.2s;
+}
+
+.bili-tts-link-btn:hover {
+  color: #FB7299;
 }

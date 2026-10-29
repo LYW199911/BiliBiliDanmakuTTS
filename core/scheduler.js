@@ -6,7 +6,7 @@
 class DanmakuScheduler {
   constructor(options = {}) {
     this.options = Object.assign({
-      dropThresholdSeconds: 2.2, // 弹幕过期丢弃阈值（秒）
+      dropThresholdSeconds: 2.0, // 弹幕过期丢弃阈值（秒）
       windowSpanSeconds: 1.2,    // 批处理合并时间窗（秒）
       minPriorityToSpeak: 15,    // 最低朗读权重阈值（过滤过水弹幕）
       baseSpeechRate: 1.1,       // 默认朗读基础语速
@@ -33,6 +33,52 @@ class DanmakuScheduler {
     this.filteredCount = 0;
     this.lastSpokenTime = -1;
     console.log(`[DanmakuScheduler] 已加载 ${this.danmakuList.length} 条弹幕`);
+  }
+
+  /**
+   * 实时追加单条弹幕（来自 DOM 监听），不破坏已有队列与游标
+   * @param {{ id: string, time: number, text: string }} dm 
+   */
+  addRealtimeDanmaku(dm) {
+    if (!dm || !dm.text) return;
+    const trimmed = dm.text.trim();
+    if (!trimmed) return;
+
+    // 避免近期重复弹幕
+    const isDuplicate = this.pendingQueue.some(item => item.id === dm.id) ||
+      this.danmakuList.some(item => Math.abs(item.time - dm.time) < 0.6 && item.text === trimmed);
+    if (isDuplicate) return;
+
+    this.danmakuList.push({ id: dm.id, time: dm.time, text: trimmed });
+
+    const { cleanText, isJunk } = normalizeDanmaku(trimmed);
+    if (isJunk || !cleanText) {
+      this.filteredCount++;
+      return;
+    }
+
+    let priority = 10;
+    if (cleanText.includes('高能') || cleanText.includes('泪目') || cleanText.includes('双厨') || cleanText.includes('神作')) {
+      priority += 25;
+    }
+    if (cleanText.length >= 4 && cleanText.length <= 16) {
+      priority += 8;
+    } else if (cleanText.length > 25) {
+      priority -= 15;
+    }
+
+    if (priority >= this.options.minPriorityToSpeak) {
+      this.pendingQueue.push({
+        id: dm.id,
+        textToSpeak: cleanText,
+        priority: priority,
+        targetTime: dm.time,
+        rate: this.options.baseSpeechRate
+      });
+      this.pendingQueue.sort((a, b) => b.priority - a.priority);
+    } else {
+      this.filteredCount++;
+    }
   }
 
   /**
@@ -96,23 +142,42 @@ class DanmakuScheduler {
     // 3. 对批次内的弹幕做清洗、聚合折叠与优先级打分
     if (batch.length > 0) {
       const processedItems = this.processBatch(batch, currentTime);
-      for (const item of processedItems) {
-        // 达到最低优先级才入队
-        if (item.priority >= this.options.minPriorityToSpeak) {
-          this.pendingQueue.push(item);
-        } else {
+      const validItems = processedItems.filter(item => item.priority >= this.options.minPriorityToSpeak);
+
+      // 【核心改进：时效优先与队列覆盖】
+      // 如果当前秒数有新的有效弹幕到达，用户想听当前秒数的内容：
+      // 立即淘汰此前积攒的落后于当前时间 0.8s 以上的陈旧待读项！
+      if (validItems.length > 0) {
+        const kept = [];
+        for (const item of this.pendingQueue) {
+          if ((currentTime - item.targetTime) <= 0.8) {
+            kept.push(item);
+          } else {
+            this.filteredCount++;
+          }
+        }
+        this.pendingQueue = kept.concat(validItems);
+      } else {
+        // 若当前秒数没有新弹幕（比如第5秒原本无弹幕），则保留此前仍在时效期内的待读项
+        for (const item of processedItems) {
           this.filteredCount++;
         }
       }
+
       // 队列按优先级降序排序（高能优先）
       this.pendingQueue.sort((a, b) => b.priority - a.priority);
+
+      // 限制队列最大长度不超过 2 条，彻底杜绝多句连读造成的 5~10 秒严重时延
+      if (this.pendingQueue.length > 2) {
+        const discarded = this.pendingQueue.splice(2);
+        this.filteredCount += discarded.length;
+      }
     }
 
     // 4. 若 TTS 空闲且队列中有任务，出队最高优先级项返回
     if (!isSpeaking && this.pendingQueue.length > 0) {
-      // 如果队列积压大于 2 条，自适应加速朗读
       const nextItem = this.pendingQueue.shift();
-      if (this.pendingQueue.length >= 2) {
+      if (this.pendingQueue.length >= 1) {
         nextItem.rate = Math.min(this.options.highDensitySpeechRate, 1.8);
       }
       this.spokenCount++;
@@ -121,6 +186,13 @@ class DanmakuScheduler {
     }
 
     return null;
+  }
+
+  /**
+   * 清空待读队列（视频暂停或跳转时调用）
+   */
+  clearQueue() {
+    this.pendingQueue = [];
   }
 
   /**
