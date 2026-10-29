@@ -6,19 +6,32 @@
 (function () {
   console.log('[BiliDanmakuTTS] 插件已加载，准备初始化...');
 
+  const settings = (typeof window !== 'undefined' && window.BiliTTSSettings)
+    ? window.BiliTTSSettings.get()
+    : {
+        enabled: true,
+        onlyWhenHidden: false,
+        autoPip: true,
+        speechRate: 1.15,
+        pauseBehavior: 'finish',
+        duckingEnabled: true,
+        duckingFactor: 0.35,
+        filterMode: 'smart',
+        voiceName: '',
+        volumeAutoFollow: true,
+        customVolume: 1.0
+      };
+
   let scheduler = null;
   let ttsEngine = null;
   let provider = null;
   let panel = null;
   let videoEl = null;
   let tickTimer = null;
-  let isEnabled = true;
-  let onlyWhenHidden = false; // 默认全时朗读模式：视频开播即朗读。用户可按需开启“仅切Tab/后台时朗读”
-  let pauseBehavior = 'finish'; // 视频暂停时行为：'finish' (读完当前句即停) 或 'stop' (立即掐断)
-  try {
-    const savedPausePref = localStorage.getItem('bili_tts_pause_pref');
-    if (savedPausePref === 'stop' || savedPausePref === 'finish') pauseBehavior = savedPausePref;
-  } catch (e) {}
+  let isEnabled = settings.enabled;
+  let onlyWhenHidden = settings.onlyWhenHidden;
+  let pauseBehavior = settings.pauseBehavior;
+  let autoPipEnabled = settings.autoPip;
   let currentUrl = window.location.href;
 
   function updateBadgeState() {
@@ -35,8 +48,6 @@
       panel.setBadge('全时朗读', 'active');
     }
   }
-
-  let autoPipEnabled = true;
 
   async function togglePiP() {
     if (!videoEl) return;
@@ -64,16 +75,23 @@
   }
 
   function init() {
-    // 1. 实例化核心组件
+    // 1. 根据记忆偏好实例化调度器与 TTS 引擎
+    let minPri = 15;
+    if (settings.filterMode === 'highlight') minPri = 25;
+    else if (settings.filterMode === 'all') minPri = 0;
+
     scheduler = new DanmakuScheduler({
-      baseSpeechRate: 1.15,
-      minPriorityToSpeak: 15
+      baseSpeechRate: settings.speechRate,
+      minPriorityToSpeak: minPri
     });
 
     ttsEngine = new TTSEngine({
-      duckingEnabled: true,
-      duckingFactor: 0.35,
-      baseRate: 1.15
+      duckingEnabled: settings.duckingEnabled,
+      duckingFactor: settings.duckingFactor,
+      baseRate: settings.speechRate,
+      voiceName: settings.voiceName,
+      autoFollowVideoVolume: settings.volumeAutoFollow,
+      volume: settings.volumeAutoFollow ? null : settings.customVolume
     });
 
     provider = new DanmakuProvider();
@@ -117,9 +135,6 @@
       onVolumeChange: (vol, autoFollow) => {
         ttsEngine.options.autoFollowVideoVolume = autoFollow;
         ttsEngine.options.volume = vol;
-        try {
-          localStorage.setItem('bili_tts_vol_pref', JSON.stringify({ autoFollow: false, volume: vol }));
-        } catch (e) {}
       },
       onAutoFollowVolumeChange: (autoFollow) => {
         ttsEngine.options.autoFollowVideoVolume = true;
@@ -127,9 +142,6 @@
         if (videoEl) {
           panel.updateVideoVolume(videoEl.volume);
         }
-        try {
-          localStorage.setItem('bili_tts_vol_pref', JSON.stringify({ autoFollow: true }));
-        } catch (e) {}
       },
       onFilterModeChange: (mode) => {
         if (mode === 'highlight') {
@@ -145,7 +157,7 @@
       },
       onTestClick: () => {
         ttsEngine.speak({
-          textToSpeak: '试听成功！当前朗读音量已生效，并已与视频原音平衡。',
+          textToSpeak: '试听成功！当前所有选项均已自动保存记忆，换视频或刷新均会保持。',
           rate: ttsEngine.options.baseRate
         });
       }
@@ -230,17 +242,16 @@
         console.log('[BiliDanmakuTTS] 成功绑定播放器视频节点并配置自动小窗');
 
         // 初始化音量设置（若用户曾手动固定音量则恢复，否则默认跟随播放器原音量）
-        let savedVolPref = null;
-        try {
-          savedVolPref = JSON.parse(localStorage.getItem('bili_tts_vol_pref'));
-        } catch (e) {}
+        const curSettings = (typeof window !== 'undefined' && window.BiliTTSSettings)
+          ? window.BiliTTSSettings.get()
+          : settings;
 
-        if (savedVolPref && savedVolPref.autoFollow === false && typeof savedVolPref.volume === 'number') {
+        if (!curSettings.volumeAutoFollow && typeof curSettings.customVolume === 'number') {
           ttsEngine.options.autoFollowVideoVolume = false;
-          ttsEngine.options.volume = savedVolPref.volume;
-          const pct = Math.round(savedVolPref.volume * 100);
+          ttsEngine.options.volume = curSettings.customVolume;
+          const pct = Math.round(curSettings.customVolume * 100);
           panel.autoFollowVolume = false;
-          panel.customVolume = savedVolPref.volume;
+          panel.customVolume = curSettings.customVolume;
           const slider = document.getElementById('bili-tts-vol-slider');
           const val = document.getElementById('bili-tts-vol-val');
           const status = document.getElementById('bili-tts-vol-status');
@@ -251,6 +262,7 @@
           if (resetBtn) resetBtn.style.display = 'inline-block';
         } else {
           ttsEngine.options.autoFollowVideoVolume = true;
+          panel.autoFollowVolume = true;
           panel.updateVideoVolume(video.volume);
         }
 

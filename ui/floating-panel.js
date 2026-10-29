@@ -3,6 +3,81 @@
  * 核心职责：在 B 站视频页右下角注入精致的拟物化/毛玻璃悬浮窗与实时字幕浮层。
  */
 
+const BILI_TTS_SETTINGS_KEY = 'bili_tts_settings';
+
+const DEFAULT_BILI_TTS_SETTINGS = {
+  enabled: true,            // 启用弹幕朗读 (Alt+D)
+  onlyWhenHidden: false,    // 仅切Tab/后台时朗读
+  autoPip: true,            // 切Tab自动开启小窗
+  volumeAutoFollow: true,   // 朗读音量是否跟随视频
+  customVolume: 1.0,        // 独立设定音量 (0.0 ~ 1.0)
+  speechRate: 1.15,         // 朗读语速 (0.8 ~ 2.0)
+  pauseBehavior: 'finish',  // 视频暂停时 ('finish' | 'stop')
+  duckingEnabled: true,     // 视频原音压限开关
+  duckingFactor: 0.35,      // 原音压低程度 (0.1 ~ 0.8)
+  filterMode: 'smart',      // 过滤模式 ('smart' | 'highlight' | 'all')
+  voiceName: '',            // 朗读人音色
+  activeTab: 'basic'        // 上次停留在哪个选项卡 ('basic' | 'audio')
+};
+
+function getBiliTTSSettings() {
+  let s = Object.assign({}, DEFAULT_BILI_TTS_SETTINGS);
+  try {
+    const raw = localStorage.getItem(BILI_TTS_SETTINGS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') {
+        s = Object.assign(s, parsed);
+      }
+    }
+  } catch (e) {}
+
+  // 向上兼容旧版独立键
+  try {
+    const oldPause = localStorage.getItem('bili_tts_pause_pref');
+    if (oldPause === 'stop' || oldPause === 'finish') s.pauseBehavior = oldPause;
+    const oldVolRaw = localStorage.getItem('bili_tts_vol_pref');
+    if (oldVolRaw) {
+      const oldVol = JSON.parse(oldVolRaw);
+      if (oldVol && typeof oldVol === 'object') {
+        if (typeof oldVol.autoFollow === 'boolean') s.volumeAutoFollow = oldVol.autoFollow;
+        if (typeof oldVol.volume === 'number') s.customVolume = oldVol.volume;
+      }
+    }
+  } catch (e) {}
+
+  return s;
+}
+
+function updateBiliTTSSettings(patch) {
+  try {
+    const s = getBiliTTSSettings();
+    Object.assign(s, patch);
+    localStorage.setItem(BILI_TTS_SETTINGS_KEY, JSON.stringify(s));
+
+    if ('pauseBehavior' in patch) {
+      localStorage.setItem('bili_tts_pause_pref', patch.pauseBehavior);
+    }
+    if ('volumeAutoFollow' in patch || 'customVolume' in patch) {
+      localStorage.setItem('bili_tts_vol_pref', JSON.stringify({
+        autoFollow: s.volumeAutoFollow,
+        volume: s.customVolume
+      }));
+    }
+    return s;
+  } catch (e) {
+    return DEFAULT_BILI_TTS_SETTINGS;
+  }
+}
+
+if (typeof window !== 'undefined') {
+  window.BiliTTSSettings = {
+    get: getBiliTTSSettings,
+    update: updateBiliTTSSettings,
+    DEFAULT: DEFAULT_BILI_TTS_SETTINGS
+  };
+}
+
 class FloatingPanel {
   constructor(options = {}) {
     this.options = Object.assign({
@@ -14,16 +89,19 @@ class FloatingPanel {
       onRateChange: null,
       onVoiceChange: null,
       onFilterModeChange: null,
+      onPauseBehaviorChange: null,
       onVolumeChange: null,
       onAutoFollowVolumeChange: null,
       onTestClick: null
     }, options);
 
+    this.settings = getBiliTTSSettings();
     this.container = null;
     this.toast = null;
     this.isExpanded = false;
-    this.autoFollowVolume = true;
-    this.customVolume = 1.0;
+    this.autoFollowVolume = this.settings.volumeAutoFollow;
+    this.customVolume = this.settings.customVolume;
+    this.selectedVoiceName = this.settings.voiceName || '';
     this.initDOM();
   }
 
@@ -47,6 +125,8 @@ class FloatingPanel {
   initDOM() {
     if (document.getElementById('bili-tts-container')) return;
 
+    const s = this.settings;
+
     // 1. 创建悬浮主容器并恢复用户记忆位置
     const container = document.createElement('div');
     container.id = 'bili-tts-container';
@@ -69,9 +149,15 @@ class FloatingPanel {
       container.style.right = '12px';
     }
 
+    const volPct = Math.round((s.customVolume || 1.0) * 100);
+    const duckPct = Math.round((s.duckingFactor || 0.35) * 100);
+    const rateVal = (s.speechRate || 1.15).toFixed(2);
+    const rateSliderVal = Math.round((s.speechRate || 1.15) * 100);
+    const isBasicTab = s.activeTab !== 'audio';
+
     container.innerHTML = `
       <!-- 最小化胶囊（极简精致设计：仅保留麦克风图标与当前状态徽章，短小美观不挡选集与进度条） -->
-      <div class="bili-tts-pill active" id="bili-tts-pill" title="点击展开设置，按住可拖动">
+      <div class="bili-tts-pill active${s.enabled ? '' : ' disabled'}" id="bili-tts-pill" title="点击展开设置，按住可拖动">
         <div class="bili-tts-pill-icon">
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg>
         </div>
@@ -92,19 +178,19 @@ class FloatingPanel {
 
         <!-- 二级导航标签页 -->
         <div class="bili-tts-tabs">
-          <button class="bili-tts-tab-btn active" id="bili-tab-btn-basic" data-tab="basic">常用设置</button>
-          <button class="bili-tts-tab-btn" id="bili-tab-btn-audio" data-tab="audio">音频与降噪</button>
+          <button class="bili-tts-tab-btn ${isBasicTab ? 'active' : ''}" id="bili-tab-btn-basic" data-tab="basic">常用设置</button>
+          <button class="bili-tts-tab-btn ${!isBasicTab ? 'active' : ''}" id="bili-tab-btn-audio" data-tab="audio">音频与降噪</button>
         </div>
 
         <!-- 可滚动内容主体 -->
         <div class="bili-tts-card-body" id="bili-tts-card-body">
           <!-- 标签页 1: 常用控制 -->
-          <div class="bili-tts-tab-content" id="bili-tab-content-basic">
+          <div class="bili-tts-tab-content" id="bili-tab-content-basic" style="display: ${isBasicTab ? 'flex' : 'none'};">
             <!-- 开启/关闭主开关 -->
             <div class="bili-tts-row">
               <span class="bili-tts-label">启用弹幕朗读 (Alt+D)</span>
               <label class="bili-tts-switch">
-                <input type="checkbox" id="bili-tts-enable-switch" checked>
+                <input type="checkbox" id="bili-tts-enable-switch" ${s.enabled ? 'checked' : ''}>
                 <span class="bili-tts-slider"></span>
               </label>
             </div>
@@ -116,7 +202,7 @@ class FloatingPanel {
                 <span class="bili-tts-sub-label">看视频时静音，切换到其他Tab时朗读</span>
               </div>
               <label class="bili-tts-switch">
-                <input type="checkbox" id="bili-tts-hidden-only-switch">
+                <input type="checkbox" id="bili-tts-hidden-only-switch" ${s.onlyWhenHidden ? 'checked' : ''}>
                 <span class="bili-tts-slider"></span>
               </label>
             </div>
@@ -128,7 +214,7 @@ class FloatingPanel {
                 <span class="bili-tts-sub-label">离开页面自动弹出画中画，常驻桌面</span>
               </div>
               <label class="bili-tts-switch">
-                <input type="checkbox" id="bili-tts-auto-pip-switch" checked>
+                <input type="checkbox" id="bili-tts-auto-pip-switch" ${s.autoPip ? 'checked' : ''}>
                 <span class="bili-tts-slider"></span>
               </label>
             </div>
@@ -137,12 +223,12 @@ class FloatingPanel {
             <div class="bili-tts-range-wrap">
               <div class="bili-tts-range-header">
                 <span>朗读音量</span>
-                <span id="bili-tts-vol-val">跟随视频 (100%)</span>
+                <span id="bili-tts-vol-val">${s.volumeAutoFollow ? '跟随视频 (100%)' : `${volPct}% (自定义)`}</span>
               </div>
-              <input type="range" class="bili-tts-range-input" id="bili-tts-vol-slider" min="0" max="100" value="100">
+              <input type="range" class="bili-tts-range-input" id="bili-tts-vol-slider" min="0" max="100" value="${s.volumeAutoFollow ? '100' : volPct}">
               <div class="bili-tts-vol-hint">
-                <span id="bili-tts-vol-status">默认跟随 B 站播放器音量</span>
-                <button class="bili-tts-link-btn" id="bili-tts-vol-reset-btn" style="display: none;">恢复跟随视频</button>
+                <span id="bili-tts-vol-status">${s.volumeAutoFollow ? '默认跟随 B 站播放器音量' : `独立设定音量: ${volPct}%`}</span>
+                <button class="bili-tts-link-btn" id="bili-tts-vol-reset-btn" style="display: ${s.volumeAutoFollow ? 'none' : 'inline-block'};">恢复跟随视频</button>
               </div>
             </div>
 
@@ -150,23 +236,23 @@ class FloatingPanel {
             <div class="bili-tts-range-wrap">
               <div class="bili-tts-range-header">
                 <span>朗读语速</span>
-                <span id="bili-tts-rate-val">1.15x</span>
+                <span id="bili-tts-rate-val">${rateVal}x</span>
               </div>
-              <input type="range" class="bili-tts-range-input" id="bili-tts-rate-slider" min="80" max="200" value="115">
+              <input type="range" class="bili-tts-range-input" id="bili-tts-rate-slider" min="80" max="200" value="${rateSliderVal}">
             </div>
 
             <!-- 视频暂停时的朗读行为 -->
             <div class="bili-tts-range-wrap">
               <span class="bili-tts-label">视频暂停时</span>
               <select class="bili-tts-select" id="bili-tts-pause-behavior">
-                <option value="finish" selected>读完当前条即停 (推荐)</option>
-                <option value="stop">立即掐断朗读</option>
+                <option value="finish"${s.pauseBehavior === 'finish' ? ' selected' : ''}>读完当前条即停 (推荐)</option>
+                <option value="stop"${s.pauseBehavior === 'stop' ? ' selected' : ''}>立即掐断朗读</option>
               </select>
             </div>
           </div>
 
           <!-- 标签页 2: 降噪与音效 -->
-          <div class="bili-tts-tab-content" id="bili-tab-content-audio" style="display: none;">
+          <div class="bili-tts-tab-content" id="bili-tab-content-audio" style="display: ${!isBasicTab ? 'flex' : 'none'};">
             <!-- 原音频侧链压限 (Ducking) 开关 -->
             <div class="bili-tts-row">
               <div class="bili-tts-label-group">
@@ -174,7 +260,7 @@ class FloatingPanel {
                 <span class="bili-tts-sub-label">朗读时自动按比例压低视频原声</span>
               </div>
               <label class="bili-tts-switch">
-                <input type="checkbox" id="bili-tts-duck-switch" checked>
+                <input type="checkbox" id="bili-tts-duck-switch" ${s.duckingEnabled ? 'checked' : ''}>
                 <span class="bili-tts-slider"></span>
               </label>
             </div>
@@ -183,18 +269,18 @@ class FloatingPanel {
             <div class="bili-tts-range-wrap">
               <div class="bili-tts-range-header">
                 <span>原音压低程度</span>
-                <span id="bili-tts-duck-val">压低至 35%</span>
+                <span id="bili-tts-duck-val">压低至 ${duckPct}%</span>
               </div>
-              <input type="range" class="bili-tts-range-input" id="bili-tts-duck-slider" min="10" max="80" value="35">
+              <input type="range" class="bili-tts-range-input" id="bili-tts-duck-slider" min="10" max="80" value="${duckPct}">
             </div>
 
             <!-- 过滤模式选择 -->
             <div class="bili-tts-range-wrap">
               <span class="bili-tts-label">过滤模式</span>
               <select class="bili-tts-select" id="bili-tts-filter-mode">
-                <option value="smart" selected>智能模式 (推荐: 过滤水词 + 高能加权)</option>
-                <option value="highlight">仅高能弹幕 (强力降噪，不打扰正片)</option>
-                <option value="all">全部朗读 (全量播报，建议提高语速)</option>
+                <option value="smart"${s.filterMode === 'smart' ? ' selected' : ''}>智能模式 (推荐: 过滤水词 + 高能加权)</option>
+                <option value="highlight"${s.filterMode === 'highlight' ? ' selected' : ''}>仅高能弹幕 (强力降噪，不打扰正片)</option>
+                <option value="all"${s.filterMode === 'all' ? ' selected' : ''}>全部朗读 (全量播报，建议提高语速)</option>
               </select>
             </div>
 
@@ -482,6 +568,8 @@ class FloatingPanel {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
         const targetTab = btn.getAttribute('data-tab');
+        this.settings.activeTab = targetTab;
+        updateBiliTTSSettings({ activeTab: targetTab });
         tabBtns.forEach(b => b.classList.toggle('active', b === btn));
         const basicContent = document.getElementById('bili-tab-content-basic');
         const audioContent = document.getElementById('bili-tab-content-audio');
@@ -496,6 +584,8 @@ class FloatingPanel {
     // 开关监听
     enableSwitch.addEventListener('change', (e) => {
       const isEnabled = e.target.checked;
+      this.settings.enabled = isEnabled;
+      updateBiliTTSSettings({ enabled: isEnabled });
       pill.classList.toggle('disabled', !isEnabled);
       if (this.options.onToggle) this.options.onToggle(isEnabled);
     });
@@ -504,6 +594,8 @@ class FloatingPanel {
     const hiddenOnlySwitch = document.getElementById('bili-tts-hidden-only-switch');
     if (hiddenOnlySwitch) {
       hiddenOnlySwitch.addEventListener('change', (e) => {
+        this.settings.onlyWhenHidden = e.target.checked;
+        updateBiliTTSSettings({ onlyWhenHidden: e.target.checked });
         if (this.options.onOnlyHiddenChange) {
           this.options.onOnlyHiddenChange(e.target.checked);
         }
@@ -512,6 +604,8 @@ class FloatingPanel {
 
     // 压音开关与滑块
     duckSwitch.addEventListener('change', (e) => {
+      this.settings.duckingEnabled = e.target.checked;
+      updateBiliTTSSettings({ duckingEnabled: e.target.checked });
       if (this.options.onDuckingChange) {
         this.options.onDuckingChange(e.target.checked, parseFloat(duckSlider.value) / 100);
       }
@@ -520,8 +614,11 @@ class FloatingPanel {
     duckSlider.addEventListener('input', (e) => {
       const pct = e.target.value;
       duckVal.textContent = `压低至 ${pct}%`;
+      const factor = parseFloat(pct) / 100;
+      this.settings.duckingFactor = factor;
+      updateBiliTTSSettings({ duckingFactor: factor });
       if (this.options.onDuckingChange) {
-        this.options.onDuckingChange(duckSwitch.checked, parseFloat(pct) / 100);
+        this.options.onDuckingChange(duckSwitch.checked, factor);
       }
     });
 
@@ -536,6 +633,9 @@ class FloatingPanel {
         const pct = parseInt(e.target.value, 10);
         this.autoFollowVolume = false;
         this.customVolume = pct / 100;
+        this.settings.volumeAutoFollow = false;
+        this.settings.customVolume = pct / 100;
+        updateBiliTTSSettings({ volumeAutoFollow: false, customVolume: pct / 100 });
         if (volVal) volVal.textContent = `${pct}% (自定义)`;
         if (volStatus) volStatus.textContent = `独立设定音量: ${pct}%`;
         if (volResetBtn) volResetBtn.style.display = 'inline-block';
@@ -549,6 +649,8 @@ class FloatingPanel {
       volResetBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         this.autoFollowVolume = true;
+        this.settings.volumeAutoFollow = true;
+        updateBiliTTSSettings({ volumeAutoFollow: true });
         volResetBtn.style.display = 'none';
         if (this.options.onAutoFollowVolumeChange) {
           this.options.onAutoFollowVolumeChange(true);
@@ -560,13 +662,18 @@ class FloatingPanel {
     rateSlider.addEventListener('input', (e) => {
       const rate = (parseInt(e.target.value, 10) / 100).toFixed(2);
       rateVal.textContent = `${rate}x`;
+      const rateNum = parseFloat(rate);
+      this.settings.speechRate = rateNum;
+      updateBiliTTSSettings({ speechRate: rateNum });
       if (this.options.onRateChange) {
-        this.options.onRateChange(parseFloat(rate));
+        this.options.onRateChange(rateNum);
       }
     });
 
     // 过滤模式
     filterSelect.addEventListener('change', (e) => {
+      this.settings.filterMode = e.target.value;
+      updateBiliTTSSettings({ filterMode: e.target.value });
       if (this.options.onFilterModeChange) {
         this.options.onFilterModeChange(e.target.value);
       }
@@ -574,29 +681,22 @@ class FloatingPanel {
 
     // 音色选择
     voiceSelect.addEventListener('change', (e) => {
+      const val = e.target.value;
+      this.selectedVoiceName = val;
+      this.settings.voiceName = val;
+      updateBiliTTSSettings({ voiceName: val });
       if (this.options.onVoiceChange) {
-        this.options.onVoiceChange(e.target.value);
+        this.options.onVoiceChange(val);
       }
     });
 
     // 视频暂停时朗读行为
     const pauseSelect = document.getElementById('bili-tts-pause-behavior');
     if (pauseSelect) {
-      try {
-        const saved = localStorage.getItem('bili_tts_pause_pref');
-        if (saved && (saved === 'finish' || saved === 'stop')) {
-          pauseSelect.value = saved;
-          if (this.options.onPauseBehaviorChange) {
-            this.options.onPauseBehaviorChange(saved);
-          }
-        }
-      } catch (err) {}
-
       pauseSelect.addEventListener('change', (e) => {
         const val = e.target.value;
-        try {
-          localStorage.setItem('bili_tts_pause_pref', val);
-        } catch (err) {}
+        this.settings.pauseBehavior = val;
+        updateBiliTTSSettings({ pauseBehavior: val });
         if (this.options.onPauseBehaviorChange) {
           this.options.onPauseBehaviorChange(val);
         }
@@ -624,6 +724,8 @@ class FloatingPanel {
 
     if (autoPipSwitch) {
       autoPipSwitch.addEventListener('change', (e) => {
+        this.settings.autoPip = e.target.checked;
+        updateBiliTTSSettings({ autoPip: e.target.checked });
         if (this.options.onAutoPipChange) {
           this.options.onAutoPipChange(e.target.checked);
         }
@@ -649,6 +751,11 @@ class FloatingPanel {
       opt.textContent = `${v.name} (${v.lang})`;
       select.appendChild(opt);
     });
+
+    // 恢复记忆的音色选择
+    if (this.selectedVoiceName) {
+      select.value = this.selectedVoiceName;
+    }
   }
 
   showToast(text) {

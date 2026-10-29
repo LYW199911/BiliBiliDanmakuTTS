@@ -677,9 +677,87 @@
   // ==========================================
   // 6. UI 与主循环驱动
   // ==========================================
+  const BILI_TTS_SETTINGS_KEY = 'bili_tts_settings';
+
+  const DEFAULT_BILI_TTS_SETTINGS = {
+    enabled: true,            // 启用弹幕朗读 (Alt+D)
+    onlyWhenHidden: false,    // 仅切Tab/后台时朗读
+    autoPip: true,            // 切Tab自动开启小窗
+    volumeAutoFollow: true,   // 朗读音量是否跟随视频
+    customVolume: 1.0,        // 独立设定音量 (0.0 ~ 1.0)
+    speechRate: 1.15,         // 朗读语速 (0.8 ~ 2.0)
+    pauseBehavior: 'finish',  // 视频暂停时 ('finish' | 'stop')
+    duckingEnabled: true,     // 视频原音压限开关
+    duckingFactor: 0.35,      // 原音压低程度 (0.1 ~ 0.8)
+    filterMode: 'smart',      // 过滤模式 ('smart' | 'high' | 'all')
+    voiceName: '',            // 朗读人音色
+    activeTab: 'basic'        // 上次停留在哪个选项卡 ('basic' | 'audio')
+  };
+
+  function getBiliTTSSettings() {
+    let s = Object.assign({}, DEFAULT_BILI_TTS_SETTINGS);
+    try {
+      const raw = localStorage.getItem(BILI_TTS_SETTINGS_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') {
+          s = Object.assign(s, parsed);
+        }
+      }
+    } catch (e) {}
+
+    try {
+      const oldPause = localStorage.getItem('bili_tts_pause_pref');
+      if (oldPause === 'stop' || oldPause === 'finish') s.pauseBehavior = oldPause;
+      const oldVolRaw = localStorage.getItem('bili_tts_vol_pref');
+      if (oldVolRaw) {
+        const oldVol = JSON.parse(oldVolRaw);
+        if (oldVol && typeof oldVol === 'object') {
+          if (typeof oldVol.autoFollow === 'boolean') s.volumeAutoFollow = oldVol.autoFollow;
+          if (typeof oldVol.volume === 'number') s.customVolume = oldVol.volume;
+        }
+      }
+    } catch (e) {}
+
+    return s;
+  }
+
+  function updateBiliTTSSettings(patch) {
+    try {
+      const s = getBiliTTSSettings();
+      Object.assign(s, patch);
+      localStorage.setItem(BILI_TTS_SETTINGS_KEY, JSON.stringify(s));
+
+      if ('pauseBehavior' in patch) {
+        localStorage.setItem('bili_tts_pause_pref', patch.pauseBehavior);
+      }
+      if ('volumeAutoFollow' in patch || 'customVolume' in patch) {
+        localStorage.setItem('bili_tts_vol_pref', JSON.stringify({
+          autoFollow: s.volumeAutoFollow,
+          volume: s.customVolume
+        }));
+      }
+      return s;
+    } catch (e) {
+      return DEFAULT_BILI_TTS_SETTINGS;
+    }
+  }
+
+  const settings = getBiliTTSSettings();
   const scheduler = new DanmakuScheduler();
+  scheduler.baseRate = settings.speechRate;
+  scheduler.minPriority = (settings.filterMode === 'high' || settings.filterMode === 'highlight') ? 25 : (settings.filterMode === 'all') ? 0 : 15;
+
   const tts = new TTSEngine();
-  let isEnabled = true;
+  tts.duckingEnabled = settings.duckingEnabled;
+  tts.duckingFactor = settings.duckingFactor;
+  tts.baseRate = settings.speechRate;
+  tts.autoFollowVolume = settings.volumeAutoFollow;
+  tts.volume = settings.volumeAutoFollow ? null : settings.customVolume;
+
+  let isEnabled = settings.enabled;
+  let onlyWhenHidden = settings.onlyWhenHidden;
+  let pauseBehavior = settings.pauseBehavior;
 
   // 恢复保存的位置
   let savedPos = null;
@@ -704,8 +782,14 @@
     container.style.right = '12px';
   }
 
+  const volPct = Math.round((settings.customVolume || 1.0) * 100);
+  const duckPct = Math.round((settings.duckingFactor || 0.35) * 100);
+  const rateVal = (settings.speechRate || 1.15).toFixed(2);
+  const rateSliderVal = Math.round((settings.speechRate || 1.15) * 100);
+  const isBasicTab = settings.activeTab !== 'audio';
+
   container.innerHTML = `
-    <div class="bili-tts-pill active" id="bili-tts-pill" title="点击展开设置，按住可拖动">
+    <div class="bili-tts-pill active${settings.enabled ? '' : ' disabled'}" id="bili-tts-pill" title="点击展开设置，按住可拖动">
       <div class="bili-tts-pill-icon">
         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg>
       </div>
@@ -722,59 +806,59 @@
       </div>
 
       <div class="bili-tts-tabs">
-        <button class="bili-tts-tab-btn active" id="bili-tab-btn-basic" data-tab="basic">常用设置</button>
-        <button class="bili-tts-tab-btn" id="bili-tab-btn-audio" data-tab="audio">音频与降噪</button>
+        <button class="bili-tts-tab-btn ${isBasicTab ? 'active' : ''}" id="bili-tab-btn-basic" data-tab="basic">常用设置</button>
+        <button class="bili-tts-tab-btn ${!isBasicTab ? 'active' : ''}" id="bili-tab-btn-audio" data-tab="audio">音频与降噪</button>
       </div>
 
       <div class="bili-tts-card-body" id="bili-tts-card-body">
-        <div class="bili-tts-tab-content" id="bili-tab-content-basic">
+        <div class="bili-tts-tab-content" id="bili-tab-content-basic" style="display: ${isBasicTab ? 'flex' : 'none'};">
           <div class="bili-tts-row">
             <span class="bili-tts-label">启用弹幕朗读 (Alt+D)</span>
-            <label class="bili-tts-switch"><input type="checkbox" id="bili-tts-enable" checked><span class="bili-tts-slider"></span></label>
+            <label class="bili-tts-switch"><input type="checkbox" id="bili-tts-enable" ${settings.enabled ? 'checked' : ''}><span class="bili-tts-slider"></span></label>
           </div>
           <div class="bili-tts-row">
             <div style="display:flex;flex-direction:column;gap:2px;">
               <span class="bili-tts-label">仅切Tab/后台时朗读</span>
               <span style="font-size:10px;color:#9499A0;">看视频时静音，切换到其他Tab时朗读</span>
             </div>
-            <label class="bili-tts-switch"><input type="checkbox" id="bili-tts-hidden-only"><span class="bili-tts-slider"></span></label>
+            <label class="bili-tts-switch"><input type="checkbox" id="bili-tts-hidden-only" ${settings.onlyWhenHidden ? 'checked' : ''}><span class="bili-tts-slider"></span></label>
           </div>
           <div class="bili-tts-range-wrap">
-            <div class="bili-tts-range-header"><span>朗读音量</span><span id="bili-vol-txt">跟随视频 (100%)</span></div>
-            <input type="range" class="bili-tts-range-input" id="bili-vol-slider" min="0" max="100" value="100">
+            <div class="bili-tts-range-header"><span>朗读音量</span><span id="bili-vol-txt">${settings.volumeAutoFollow ? '跟随视频 (100%)' : `${volPct}% (自定义)`}</span></div>
+            <input type="range" class="bili-tts-range-input" id="bili-vol-slider" min="0" max="100" value="${settings.volumeAutoFollow ? '100' : volPct}">
             <div class="bili-tts-vol-hint">
-              <span id="bili-vol-status">默认跟随 B 站播放器音量</span>
-              <button class="bili-tts-link-btn" id="bili-vol-reset-btn" style="display: none;">恢复跟随视频</button>
+              <span id="bili-vol-status">${settings.volumeAutoFollow ? '默认跟随 B 站播放器音量' : `独立设定音量: ${volPct}%`}</span>
+              <button class="bili-tts-link-btn" id="bili-vol-reset-btn" style="display: ${settings.volumeAutoFollow ? 'none' : 'inline-block'};">恢复跟随视频</button>
             </div>
           </div>
           <div class="bili-tts-range-wrap">
-            <div class="bili-tts-range-header"><span>朗读语速</span><span id="bili-rate-txt">1.15x</span></div>
-            <input type="range" class="bili-tts-range-input" id="bili-rate-slider" min="80" max="200" value="115">
+            <div class="bili-tts-range-header"><span>朗读语速</span><span id="bili-rate-txt">${rateVal}x</span></div>
+            <input type="range" class="bili-tts-range-input" id="bili-rate-slider" min="80" max="200" value="${rateSliderVal}">
           </div>
           <div class="bili-tts-range-wrap">
             <span class="bili-tts-label">视频暂停时</span>
             <select class="bili-tts-select" id="bili-pause-select">
-              <option value="finish" selected>读完当前条即停 (推荐)</option>
-              <option value="stop">立即掐断朗读</option>
+              <option value="finish"${settings.pauseBehavior === 'finish' ? ' selected' : ''}>读完当前条即停 (推荐)</option>
+              <option value="stop"${settings.pauseBehavior === 'stop' ? ' selected' : ''}>立即掐断朗读</option>
             </select>
           </div>
         </div>
 
-        <div class="bili-tts-tab-content" id="bili-tab-content-audio" style="display: none;">
+        <div class="bili-tts-tab-content" id="bili-tab-content-audio" style="display: ${!isBasicTab ? 'flex' : 'none'};">
           <div class="bili-tts-row">
             <span class="bili-tts-label">视频音频压限 (Ducking)</span>
-            <label class="bili-tts-switch"><input type="checkbox" id="bili-tts-duck" checked><span class="bili-tts-slider"></span></label>
+            <label class="bili-tts-switch"><input type="checkbox" id="bili-tts-duck" ${settings.duckingEnabled ? 'checked' : ''}><span class="bili-tts-slider"></span></label>
           </div>
           <div class="bili-tts-range-wrap">
-            <div class="bili-tts-range-header"><span>原音压低程度</span><span id="bili-duck-txt">压低至 35%</span></div>
-            <input type="range" class="bili-tts-range-input" id="bili-duck-slider" min="10" max="80" value="35">
+            <div class="bili-tts-range-header"><span>原音压低程度</span><span id="bili-duck-txt">压低至 ${duckPct}%</span></div>
+            <input type="range" class="bili-tts-range-input" id="bili-duck-slider" min="10" max="80" value="${duckPct}">
           </div>
           <div class="bili-tts-range-wrap">
             <span class="bili-tts-label">过滤模式</span>
             <select class="bili-tts-select" id="bili-mode-select">
-              <option value="smart" selected>智能模式 (推荐: 梗词加权 + 自动折叠)</option>
-              <option value="high">仅高能弹幕 (强力降噪)</option>
-              <option value="all">全部朗读 (全量接收)</option>
+              <option value="smart"${settings.filterMode === 'smart' ? ' selected' : ''}>智能模式 (推荐: 梗词加权 + 自动折叠)</option>
+              <option value="high"${settings.filterMode === 'high' || settings.filterMode === 'highlight' ? ' selected' : ''}>仅高能弹幕 (强力降噪)</option>
+              <option value="all"${settings.filterMode === 'all' ? ' selected' : ''}>全部朗读 (全量接收)</option>
             </select>
           </div>
         </div>
@@ -958,6 +1042,7 @@
     btn.onclick = (e) => {
       e.stopPropagation();
       const targetTab = btn.getAttribute('data-tab');
+      updateBiliTTSSettings({ activeTab: targetTab });
       tabBtns.forEach(b => b.classList.toggle('active', b === btn));
       const basicContent = document.getElementById('bili-tab-content-basic');
       const audioContent = document.getElementById('bili-tab-content-audio');
@@ -968,8 +1053,6 @@
       adjustCardPosition();
     };
   });
-
-  let onlyWhenHidden = false;
 
   function updateBadge() {
     const badge = document.getElementById('bili-tts-badge');
@@ -991,9 +1074,11 @@
       badge.classList.add('active-bg');
     }
   }
+  updateBadge();
 
   document.getElementById('bili-tts-enable').onchange = (e) => {
     isEnabled = e.target.checked;
+    updateBiliTTSSettings({ enabled: isEnabled });
     pill.classList.toggle('disabled', !isEnabled);
     if (!isEnabled) tts.stop();
     updateBadge();
@@ -1003,6 +1088,7 @@
   if (hiddenOnlyEl) {
     hiddenOnlyEl.onchange = (e) => {
       onlyWhenHidden = e.target.checked;
+      updateBiliTTSSettings({ onlyWhenHidden: onlyWhenHidden });
       if (onlyWhenHidden && !document.hidden) {
         tts.stop();
         toast.classList.remove('visible');
@@ -1019,9 +1105,14 @@
     updateBadge();
   });
 
-  document.getElementById('bili-tts-duck').onchange = (e) => { tts.duckingEnabled = e.target.checked; };
+  document.getElementById('bili-tts-duck').onchange = (e) => {
+    tts.duckingEnabled = e.target.checked;
+    updateBiliTTSSettings({ duckingEnabled: e.target.checked });
+  };
   document.getElementById('bili-duck-slider').oninput = (e) => {
-    tts.duckingFactor = e.target.value / 100;
+    const factor = e.target.value / 100;
+    tts.duckingFactor = factor;
+    updateBiliTTSSettings({ duckingFactor: factor });
     document.getElementById('bili-duck-txt').textContent = `压低至 ${e.target.value}%`;
   };
 
@@ -1052,9 +1143,7 @@
       volTxt.textContent = `${pct}% (自定义)`;
       volStatus.textContent = `独立设定音量: ${pct}%`;
       volResetBtn.style.display = 'inline-block';
-      try {
-        localStorage.setItem('bili_tts_vol_pref', JSON.stringify({ autoFollow: false, volume: tts.volume }));
-      } catch (err) {}
+      updateBiliTTSSettings({ volumeAutoFollow: false, customVolume: tts.volume });
     };
   }
 
@@ -1065,19 +1154,20 @@
       tts.volume = null;
       volResetBtn.style.display = 'none';
       if (activeVideo) syncVideoVolume(activeVideo.volume);
-      try {
-        localStorage.setItem('bili_tts_vol_pref', JSON.stringify({ autoFollow: true }));
-      } catch (err) {}
+      updateBiliTTSSettings({ volumeAutoFollow: true });
     };
   }
   document.getElementById('bili-rate-slider').oninput = (e) => {
     const r = (e.target.value / 100).toFixed(2);
-    tts.baseRate = parseFloat(r);
-    scheduler.baseRate = parseFloat(r);
+    const numR = parseFloat(r);
+    tts.baseRate = numR;
+    scheduler.baseRate = numR;
+    updateBiliTTSSettings({ speechRate: numR });
     document.getElementById('bili-rate-txt').textContent = `${r}x`;
   };
   document.getElementById('bili-mode-select').onchange = (e) => {
-    scheduler.minPriority = (e.target.value === 'high') ? 25 : (e.target.value === 'all') ? 0 : 15;
+    scheduler.minPriority = (e.target.value === 'high' || e.target.value === 'highlight') ? 25 : (e.target.value === 'all') ? 0 : 15;
+    updateBiliTTSSettings({ filterMode: e.target.value });
   };
   const togglePiP = async () => {
     if (!activeVideo) return;
@@ -1097,7 +1187,7 @@
   if (pipCardBtn) pipCardBtn.onclick = (e) => { e.stopPropagation(); togglePiP(); };
 
   document.getElementById('bili-test-btn').onclick = () => {
-    tts.speak({ textToSpeak: '试听成功！切换到其他标签页或息屏时，弹幕就会在此处自动朗读并压低视频原音。' });
+    tts.speak({ textToSpeak: '试听成功！当前所有设置已自动记忆保存，无论切换标签页还是打开新视频均会保持。' });
   };
 
   tts.onStart = (txt) => {
@@ -1116,20 +1206,12 @@
     }
   });
 
-  let pauseBehavior = 'finish';
-  try {
-    const savedPause = localStorage.getItem('bili_tts_pause_pref');
-    if (savedPause === 'stop' || savedPause === 'finish') pauseBehavior = savedPause;
-  } catch (e) {}
-
   const pauseSelect = document.getElementById('bili-pause-select');
   if (pauseSelect) {
     pauseSelect.value = pauseBehavior;
     pauseSelect.onchange = (e) => {
       pauseBehavior = e.target.value;
-      try {
-        localStorage.setItem('bili_tts_pause_pref', pauseBehavior);
-      } catch (err) {}
+      updateBiliTTSSettings({ pauseBehavior: pauseBehavior });
     };
   }
 
@@ -1156,15 +1238,11 @@
     tts.setVideo(v);
 
     // 初始化音量同步或恢复自定义音量
-    let savedVolPref = null;
-    try {
-      savedVolPref = JSON.parse(localStorage.getItem('bili_tts_vol_pref'));
-    } catch (e) {}
-
-    if (savedVolPref && savedVolPref.autoFollow === false && typeof savedVolPref.volume === 'number') {
+    const curSettings = getBiliTTSSettings();
+    if (!curSettings.volumeAutoFollow && typeof curSettings.customVolume === 'number') {
       tts.autoFollowVolume = false;
-      tts.volume = savedVolPref.volume;
-      const pct = Math.round(savedVolPref.volume * 100);
+      tts.volume = curSettings.customVolume;
+      const pct = Math.round(curSettings.customVolume * 100);
       if (volSlider) volSlider.value = pct;
       if (volTxt) volTxt.textContent = `${pct}% (自定义)`;
       if (volStatus) volStatus.textContent = `独立设定音量: ${pct}%`;
