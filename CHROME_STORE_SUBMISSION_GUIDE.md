@@ -19,9 +19,10 @@
 * **大宣传横幅 (Marquee Promo Tile - 推荐)**：  
   [`promo/promo_marquee_1400x560.png`](file:///c:/Users/lin/Desktop/Repo/BiliDanmakuTTS-Extension/promo/promo_marquee_1400x560.png) (1400 x 560 px)
 
-* **商店功能截图 (Store Screenshots - 至少一张)**：  
-  [`promo/screenshot_1_1280x800.png`](file:///c:/Users/lin/Desktop/Repo/BiliDanmakuTTS-Extension/promo/screenshot_1_1280x800.png) (1280 x 800 px)  
-  [`promo/screenshot_2_1280x800.png`](file:///c:/Users/lin/Desktop/Repo/BiliDanmakuTTS-Extension/promo/screenshot_2_1280x800.png) (1280 x 800 px)
+* **商店功能截图 (Store Screenshots - 推荐 3 张，已包含实景真机图)**：  
+  [`promo/promo_ui_panel_1280x800.png`](file:///c:/Users/lin/Desktop/Repo/BiliDanmakuTTS-Extension/promo/promo_ui_panel_1280x800.png) (1280 x 800 px - 全能控制中心实景面板展示)  
+  [`promo/screenshot_1_1280x800.png`](file:///c:/Users/lin/Desktop/Repo/BiliDanmakuTTS-Extension/promo/screenshot_1_1280x800.png) (1280 x 800 px - 实时语音播报与自动原音压限)  
+  [`promo/screenshot_2_1280x800.png`](file:///c:/Users/lin/Desktop/Repo/BiliDanmakuTTS-Extension/promo/screenshot_2_1280x800.png) (1280 x 800 px - 极简悬浮组件与零滞后抢占队列)
 
 * **隐私政策链接 (Privacy Policy URL)**：  
   `https://github.com/LYW199911/BiliBiliDanmakuTTS/blob/main/PRIVACY_POLICY.md`
